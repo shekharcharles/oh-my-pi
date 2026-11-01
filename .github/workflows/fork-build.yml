@@ -1,0 +1,83 @@
+name: Fork build (omp.exe)
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_ref:
+        description: "Ref to build (branch, tag, or sha)"
+        required: true
+        default: "fix/conpty-pending-wrap-overlap"
+      prerelease:
+        description: "Mark the GitHub Release as a prerelease"
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-build
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Build omp.exe for Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout requested ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.build_ref }}
+          fetch-depth: 1
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+
+      - name: Install workspace dependencies
+        shell: bash
+        run: bun install --frozen-lockfile
+
+      - name: Fetch official pi-natives addon for this version
+        shell: bash
+        run: |
+          set -euo pipefail
+          ver=$(node -p "require('./packages/natives/package.json').version")
+          echo "pi-natives version: $ver"
+          cd "$RUNNER_TEMP"
+          npm pack "@oh-my-pi/pi-natives-win32-x64@$ver"
+          tar -xzf "oh-my-pi-pi-natives-win32-x64-$ver.tgz"
+          cp package/pi_natives.win32-x64-baseline.node "$GITHUB_WORKSPACE/packages/natives/native/"
+          echo "PI_NATIVES_VERSION=$ver" >> "$GITHUB_ENV"
+
+      - name: Build binary
+        shell: bash
+        working-directory: packages/coding-agent
+        run: bun run build
+
+      - name: Verify artifact
+        shell: bash
+        run: |
+          ls -la packages/coding-agent/dist/
+          test -f packages/coding-agent/dist/omp.exe
+
+      - name: Create release with omp.exe
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          short=$(git rev-parse --short HEAD)
+          tag="v${PI_NATIVES_VERSION}-fork.${GITHUB_RUN_NUMBER}-${short}"
+          flags=()
+          if [ "${{ inputs.prerelease }}" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$tag" \
+            "packages/coding-agent/dist/omp.exe#omp.exe" \
+            --target "$sha" \
+            --title "omp ${PI_NATIVES_VERSION} fork build (run ${GITHUB_RUN_NUMBER})" \
+            --notes "Built from \`${{ inputs.build_ref }}\` (\`${short}\`) on windows-latest. Bun 1.4.4 + the official @oh-my-pi/pi-natives-win32-x64@$PI_NATIVES_VERSION addon from npm, the same artifact upstream ships. Community CI build of a PR branch, not an official release." \
+            "${flags[@]}"

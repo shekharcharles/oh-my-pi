@@ -11,7 +11,7 @@ on:
         description: "Mark the GitHub Release as a prerelease"
         type: boolean
         required: false
-        default: true
+        default: false
 
 permissions:
   contents: write
@@ -91,12 +91,23 @@ jobs:
           set -euo pipefail
           sha=$(git rev-parse HEAD)
           short=$(git rev-parse --short HEAD)
-          tag="v${PI_NATIVES_VERSION}-fork.${GITHUB_RUN_NUMBER}-${short}"
           flags=()
           if [ "${{ inputs.prerelease }}" = "true" ]; then flags+=(--prerelease); fi
-          gh release create "$tag" \
-            "packages/coding-agent/dist/omp.exe#omp.exe" \
-            --target "$sha" \
-            --title "omp ${PI_NATIVES_VERSION} fork build (run ${GITHUB_RUN_NUMBER})" \
-            --notes-file "$RUNNER_TEMP/release-notes.md" \
-            "${flags[@]}"
+          # Prefer the clean version tag so the Releases card reads like an
+          # upstream release (v18.14.2 + Latest badge). If that tag/release
+          # already exists on the fork, fall back to a suffixed tag.
+          tag="v${PI_NATIVES_VERSION}"
+          if ! gh release create "$tag" \
+              "packages/coding-agent/dist/omp.exe#omp.exe" \
+              --target "$sha" \
+              --title "$tag" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
+              "${flags[@]}" 2>/dev/null; then
+            tag="v${PI_NATIVES_VERSION}-fork.${GITHUB_RUN_NUMBER}-${short}"
+            gh release create "$tag" \
+              "packages/coding-agent/dist/omp.exe#omp.exe" \
+              --target "$sha" \
+              --title "$tag" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
+              "${flags[@]}"
+          fi

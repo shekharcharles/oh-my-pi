@@ -66,6 +66,25 @@ jobs:
           ls -la packages/coding-agent/dist/
           test -f packages/coding-agent/dist/omp.exe
 
+      - name: Compose release notes from changelogs
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            for pkg in coding-agent tui agent ai catalog; do
+              f="packages/$pkg/CHANGELOG.md"
+              [ -f "$f" ] || continue
+              section=$(awk '/^## \[Unreleased\]/{ok=1;next} /^## \[/{ok=0} ok' "$f")
+              # drop an empty section or one that only has empty headings
+              body=$(printf '%s\n' "$section" | sed '/^$/d')
+              [ -n "$body" ] || continue
+              printf '### %s\n\n%s\n\n' "$pkg" "$body"
+            done
+            sha=$(git rev-parse HEAD)
+            printf '**This build** — `omp.exe` (Windows x64) from `%s` (`%s`). Bun 1.4.4 + the official `@oh-my-pi/pi-natives-win32-x64@%s` addon from npm. Community CI build of a PR branch, not an official release.\n' "${{ inputs.build_ref }}" "${sha:0:7}" "$PI_NATIVES_VERSION"
+          } > "$RUNNER_TEMP/release-notes.md"
+          cat "$RUNNER_TEMP/release-notes.md"
+
       - name: Create release with omp.exe
         shell: bash
         run: |
@@ -79,5 +98,5 @@ jobs:
             "packages/coding-agent/dist/omp.exe#omp.exe" \
             --target "$sha" \
             --title "omp ${PI_NATIVES_VERSION} fork build (run ${GITHUB_RUN_NUMBER})" \
-            --notes "Built from \`${{ inputs.build_ref }}\` (\`${short}\`) on windows-latest. Bun 1.4.4 + the official @oh-my-pi/pi-natives-win32-x64@$PI_NATIVES_VERSION addon from npm, the same artifact upstream ships. Community CI build of a PR branch, not an official release." \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
             "${flags[@]}"
